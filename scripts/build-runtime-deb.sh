@@ -81,7 +81,7 @@ Architecture: all
 Replaces: neovim (<< ${deb_version})
 Breaks: neovim (<< ${deb_version})
 Installed-Size: ${installed_size}
-Maintainer: Neovim Deb Builder <noreply@github.com>
+Maintainer: Fernando Silveira <fsilveira@gmail.com>
 Homepage: https://neovim.io
 Description: Heavily optimized vi-like text editor (upstream prebuilt release) - runtime files
  Unofficial repackaging of the official Neovim prebuilt release runtime
