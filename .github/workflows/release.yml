@@ -72,12 +72,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # debian:11 (glibc 2.31) is excluded: upstream Neovim prebuilt
+        # binaries require glibc >= 2.34, which only Debian 12+ ships. This
+        # is a hard binary incompatibility, not something packaging can fix.
         arch: [amd64, arm64]
         image:
           - ubuntu:22.04
           - ubuntu:24.04
           - ubuntu:26.04
-          - debian:11
           - debian:12
           - debian:13
     steps:

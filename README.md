@@ -49,13 +49,18 @@ package (if any) is already installed. No special flags are needed.
    specific version passed to `workflow_dispatch`), skips if a matching
    GitHub Release already exists in this repo, builds `.deb`s for both
    architectures, tests each one across Ubuntu 22.04/24.04/26.04 and Debian
-   11/12/13, and only publishes a GitHub Release if every install/smoke-test
+   12/13, and only publishes a GitHub Release if every install/smoke-test
    combination passes.
 
 ## Caveats
 
 - This is a repackaging of upstream binaries, not an independently built or
   audited package. Use at your own risk.
+- Requires glibc >= 2.34, matching upstream's build requirement — Ubuntu
+  22.04+ and Debian 12+. Older releases such as Debian 11 (glibc 2.31)
+  can't run the upstream binary at all; this is a limitation of the
+  official Neovim release itself, not something this repackaging can work
+  around.
 - Once installed, `dpkg`/`apt` will consider `neovim` "installed" at this
   package's version. A subsequent `apt upgrade` will **not** automatically
   downgrade you back to your distro's own `neovim` package — you'd need to
