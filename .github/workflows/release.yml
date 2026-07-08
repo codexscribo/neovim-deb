@@ -1,0 +1,124 @@
+name: Build and release Neovim .deb packages
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Neovim tag to build (e.g. v0.12.4). Leave empty to use the latest release.'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  determine-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - name: Determine target version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            tag="$(curl -fsSL https://api.github.com/repos/neovim/neovim/releases/latest | jq -r .tag_name)"
+            echo "version=$tag" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check whether this release already exists
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.version.outputs.version }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release ${{ steps.version.outputs.version }} already exists, nothing to do."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: determine-version
+    if: needs.determine-version.outputs.release_exists != 'true'
+    # The arm64 leg needs to run on a native arm64 machine: build-deb.sh uses
+    # `ldd` to resolve nvim's shared-library dependencies, which requires
+    # actually executing the target binary against real arm64 system
+    # libraries. Under QEMU emulation on an amd64 host, those libraries
+    # aren't present at the paths the arm64 dynamic linker searches, so
+    # dependency detection would silently come back wrong.
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build .deb
+        run: scripts/build-deb.sh "${{ needs.determine-version.outputs.version }}" "${{ matrix.arch }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neovim-deb-${{ matrix.arch }}
+          path: dist/*.deb
+
+  test:
+    needs: [determine-version, build]
+    if: needs.determine-version.outputs.release_exists != 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+        image:
+          - ubuntu:22.04
+          - ubuntu:24.04
+          - ubuntu:26.04
+          - debian:11
+          - debian:12
+          - debian:13
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: neovim-deb-${{ matrix.arch }}
+          path: dist
+
+      - uses: docker/setup-qemu-action@v3
+
+      - name: Install, smoke-test, and uninstall inside ${{ matrix.image }}
+        env:
+          VERSION: ${{ needs.determine-version.outputs.version }}
+        run: |
+          version_number="${VERSION#v}"
+          docker run --rm --platform "linux/${{ matrix.arch }}" \
+            -v "$PWD:/w" -w /w "${{ matrix.image }}" \
+            ./scripts/test-deb.sh "./dist/neovim_${version_number}_${{ matrix.arch }}.deb" "$version_number"
+
+  release:
+    needs: [determine-version, build, test]
+    if: needs.determine-version.outputs.release_exists != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: neovim-deb-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.determine-version.outputs.version }}
+        run: |
+          gh release create "$VERSION" dist/*.deb \
+            --title "Neovim $VERSION (.deb packages)" \
+            --notes "Unofficial repackaging of the official Neovim prebuilt release binaries as .deb packages for Ubuntu/Debian. Not affiliated with or endorsed by the Neovim project.
+
+          Upstream release notes: https://github.com/neovim/neovim/releases/tag/$VERSION"
