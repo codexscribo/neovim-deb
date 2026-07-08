@@ -109,8 +109,23 @@ jobs:
           name: neovim-deb-${{ matrix.arch }}
           path: dist/*.deb
 
+  build-runtime:
+    needs: determine-version
+    if: needs.determine-version.outputs.release_exists != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build .deb
+        run: scripts/build-runtime-deb.sh "${{ needs.determine-version.outputs.version }}" "${{ needs.determine-version.outputs.package_revision }}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: neovim-deb-all
+          path: dist/*.deb
+
   test:
-    needs: [determine-version, build]
+    needs: [determine-version, build, build-runtime]
     if: needs.determine-version.outputs.release_exists != 'true'
     runs-on: ubuntu-latest
     strategy:
@@ -134,6 +149,11 @@ jobs:
           name: neovim-deb-${{ matrix.arch }}
           path: dist
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: neovim-deb-all
+          path: dist
+
       - uses: docker/setup-qemu-action@v4
 
       - name: Install, smoke-test, and uninstall inside ${{ matrix.image }}
@@ -145,10 +165,10 @@ jobs:
           deb_version="${version_number}-${PACKAGE_REVISION}"
           docker run --rm --platform "linux/${{ matrix.arch }}" \
             -v "$PWD:/w" -w /w "${{ matrix.image }}" \
-            ./scripts/test-deb.sh "./dist/neovim_${deb_version}_${{ matrix.arch }}.deb" "$version_number"
+            ./scripts/test-deb.sh "./dist/neovim_${deb_version}_${{ matrix.arch }}.deb" "./dist/neovim-runtime_${deb_version}_all.deb" "$version_number"
 
   release:
-    needs: [determine-version, build, test]
+    needs: [determine-version, build, build-runtime, test]
     if: needs.determine-version.outputs.release_exists != 'true'
     runs-on: ubuntu-latest
     steps:

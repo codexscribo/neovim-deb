@@ -57,10 +57,7 @@ cd "$extracted_dir"
 echo "Building package root"
 pkgroot="$extracted_dir/pkgroot"
 mkdir -p "$pkgroot/usr" "$pkgroot/DEBIAN"
-cp -a bin lib share "$pkgroot/usr/"
-
-# Compress the man page per Debian policy.
-gzip -9n "$pkgroot/usr/share/man/man1/nvim.1"
+cp -a bin lib "$pkgroot/usr/"
 
 installed_size="$(du -sk "$pkgroot/usr" | cut -f1)"
 
@@ -85,14 +82,15 @@ for elf in "${elf_files[@]}"; do
   done < <(ldd "$elf" 2>/dev/null | awk '{ if ($3 ~ /^\//) print $3; else if ($1 ~ /^\//) print $1 }')
 done
 
-depends="$(IFS=,; echo "${!dep_packages[*]}" | sed 's/,/, /g')"
+ldd_depends="$(IFS=,; echo "${!dep_packages[*]}" | sed 's/,/, /g')"
+depends="neovim-runtime (= ${deb_version})"
+[[ -n "$ldd_depends" ]] && depends="${depends}, ${ldd_depends}"
 
 echo "Writing control file"
-# Debian/Ubuntu split their own neovim package into "neovim" (binary) and
-# "neovim-runtime" (arch:all runtime files). This package bundles everything
-# into one, so it must claim neovim-runtime's files (desktop entry, icons,
-# locale files, ...) to upgrade cleanly over a distro-installed neovim
-# instead of dpkg refusing with "trying to overwrite" errors.
+# Like Debian/Ubuntu's own split of neovim into "neovim" (binary) and
+# "neovim-runtime" (arch:all runtime files), this package ships only bin/lib
+# and depends on neovim-runtime (built by build-runtime-deb.sh) for the
+# arch-independent share/ files.
 cat > "$pkgroot/DEBIAN/control" <<EOF
 Package: neovim
 Version: ${deb_version}
@@ -100,8 +98,6 @@ Section: editors
 Priority: optional
 Architecture: ${arch}
 Depends: ${depends}
-Replaces: neovim-runtime
-Breaks: neovim-runtime
 Installed-Size: ${installed_size}
 Maintainer: Neovim Deb Builder <noreply@github.com>
 Homepage: https://neovim.io
