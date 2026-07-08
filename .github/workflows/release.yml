@@ -55,12 +55,12 @@ jobs:
       matrix:
         arch: [amd64, arm64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build .deb
         run: scripts/build-deb.sh "${{ needs.determine-version.outputs.version }}" "${{ matrix.arch }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: neovim-deb-${{ matrix.arch }}
           path: dist/*.deb
@@ -83,14 +83,14 @@ jobs:
           - debian:12
           - debian:13
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: neovim-deb-${{ matrix.arch }}
           path: dist
 
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
 
       - name: Install, smoke-test, and uninstall inside ${{ matrix.image }}
         env:
@@ -106,9 +106,9 @@ jobs:
     if: needs.determine-version.outputs.release_exists != 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: neovim-deb-*
           path: dist
