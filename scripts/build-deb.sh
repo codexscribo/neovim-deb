@@ -1,19 +1,25 @@
 #!/usr/bin/env bash
 # Repackage an official upstream Neovim prebuilt release tarball into a .deb.
 #
-# Usage: build-deb.sh <version> <arch>
-#   <version>  upstream tag, e.g. v0.12.4
-#   <arch>     amd64 | arm64
+# Usage: build-deb.sh <version> <arch> [package_revision]
+#   <version>           upstream tag, e.g. v0.12.4
+#   <arch>              amd64 | arm64
+#   [package_revision]  our packaging revision for this upstream version
+#                        (Debian "debian_revision" convention). Defaults to 1.
+#                        Bump this to publish a new .deb for the same
+#                        upstream Neovim version, e.g. after a packaging-only
+#                        fix, without waiting for a new upstream release.
 
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-  echo "Usage: $0 <version> <arch>" >&2
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+  echo "Usage: $0 <version> <arch> [package_revision]" >&2
   exit 1
 fi
 
 version="$1"
 arch="$2"
+package_revision="${3:-1}"
 
 case "$arch" in
   amd64) upstream_arch="x86_64" ;;
@@ -25,6 +31,7 @@ case "$arch" in
 esac
 
 version_number="${version#v}"
+deb_version="${version_number}-${package_revision}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dist_dir="$repo_root/dist"
@@ -88,7 +95,7 @@ echo "Writing control file"
 # instead of dpkg refusing with "trying to overwrite" errors.
 cat > "$pkgroot/DEBIAN/control" <<EOF
 Package: neovim
-Version: ${version_number}
+Version: ${deb_version}
 Section: editors
 Priority: optional
 Architecture: ${arch}
@@ -105,7 +112,7 @@ Description: Heavily optimized vi-like text editor (upstream prebuilt release)
 EOF
 
 mkdir -p "$dist_dir"
-deb_path="$dist_dir/neovim_${version_number}_${arch}.deb"
+deb_path="$dist_dir/neovim_${deb_version}_${arch}.deb"
 
 echo "Building ${deb_path}"
 dpkg-deb --root-owner-group --build "$pkgroot" "$deb_path"

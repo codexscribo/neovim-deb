@@ -21,8 +21,8 @@ sudo dpkg -i ./neovim_<version>_amd64.deb
 sudo apt -f install
 ```
 
-Replace `amd64` with `arm64` on ARM systems, and `<version>` with the version
-number from the release you downloaded (e.g. `0.12.4`).
+Replace `amd64` with `arm64` on ARM systems, and `<version>` with the full
+version string from the release you downloaded (e.g. `0.12.4-1`).
 
 The package is named `neovim` — the same name Debian/Ubuntu use for their own
 `neovim` package — so installing it upgrades or supersedes whatever `neovim`
@@ -33,13 +33,27 @@ package (if any) is already installed. No special flags are needed.
 - `amd64`
 - `arm64`
 
+## Versioning
+
+Package versions follow Debian's `<upstream_version>-<package_revision>`
+convention, e.g. `0.12.4-1`. `<upstream_version>` is the upstream Neovim
+version; `<package_revision>` identifies how many times *this repackaging*
+has been published for that same upstream version. A packaging-only fix
+(say, a dependency-detection bug) can be re-released as `0.12.4-2` without
+waiting for a new upstream Neovim release. Each `<version>-<revision>`
+combination is published as its own GitHub Release, tagged e.g. `v0.12.4-2`,
+so every past revision stays downloadable — grabbing the `latest` release
+always gets you the newest revision of the newest version.
+
 ## How it works
 
-1. **`scripts/build-deb.sh <version> <arch>`** downloads the matching upstream
-   release tarball, lays its `bin/`, `lib/`, and `share/` directories out
-   under `pkgroot/usr/`, compresses the man page, auto-detects runtime
-   dependencies with `ldd` + `dpkg -S`, writes a `DEBIAN/control` file, and
-   builds the `.deb` with `dpkg-deb`.
+1. **`scripts/build-deb.sh <version> <arch> [package_revision]`** downloads
+   the matching upstream release tarball, lays its `bin/`, `lib/`, and
+   `share/` directories out under `pkgroot/usr/`, compresses the man page,
+   auto-detects runtime dependencies with `ldd` + `dpkg -S`, writes a
+   `DEBIAN/control` file with version `<version>-<package_revision>`
+   (`package_revision` defaults to `1`), and builds the `.deb` with
+   `dpkg-deb`.
 2. **`scripts/test-deb.sh <deb> <version>`** installs the distro's own stock
    `neovim` package first, then installs the built package over it to
    exercise the upgrade path, checks that `nvim` runs and reports the right
@@ -47,12 +61,16 @@ package (if any) is already installed. No special flags are needed.
    uninstalls it and confirms cleanup.
 3. **`.github/workflows/release.yml`** runs on a daily schedule (and can be
    triggered manually). It resolves the latest upstream Neovim release (or a
-   specific version passed to `workflow_dispatch`), skips if a matching
-   GitHub Release already exists in this repo, builds `.deb`s for both
-   architectures, tests each one across Ubuntu 22.04/24.04/26.04 and Debian
-   12/13 — including upgrading from each distro's stock `neovim` package —
-   and only publishes a GitHub Release if every install/smoke-test
-   combination passes.
+   specific version passed to `workflow_dispatch`), and auto-picks the next
+   package revision for that version (or uses one passed explicitly via
+   `workflow_dispatch`). The scheduled run skips entirely if a release for
+   the resolved version already exists — its job is just to catch new
+   upstream releases — but a manual `workflow_dispatch` run always proceeds,
+   which is how you publish a packaging-only fix under a bumped revision. It
+   then builds `.deb`s for both architectures, tests each one across Ubuntu
+   22.04/24.04/26.04 and Debian 12/13 — including upgrading from each
+   distro's stock `neovim` package — and only publishes a GitHub Release if
+   every install/smoke-test combination passes.
 
 ## Caveats
 
