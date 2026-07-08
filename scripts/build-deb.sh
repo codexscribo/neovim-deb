@@ -81,6 +81,11 @@ done
 depends="$(IFS=,; echo "${!dep_packages[*]}" | sed 's/,/, /g')"
 
 echo "Writing control file"
+# Debian/Ubuntu split their own neovim package into "neovim" (binary) and
+# "neovim-runtime" (arch:all runtime files). This package bundles everything
+# into one, so it must claim neovim-runtime's files (desktop entry, icons,
+# locale files, ...) to upgrade cleanly over a distro-installed neovim
+# instead of dpkg refusing with "trying to overwrite" errors.
 cat > "$pkgroot/DEBIAN/control" <<EOF
 Package: neovim
 Version: ${version_number}
@@ -88,6 +93,8 @@ Section: editors
 Priority: optional
 Architecture: ${arch}
 Depends: ${depends}
+Replaces: neovim-runtime
+Breaks: neovim-runtime
 Installed-Size: ${installed_size}
 Maintainer: Neovim Deb Builder <noreply@github.com>
 Homepage: https://neovim.io

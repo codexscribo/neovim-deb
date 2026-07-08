@@ -21,7 +21,6 @@ fail() {
 
 [[ -f "$deb_path" ]] || fail "deb file not found: $deb_path"
 
-echo "==> Installing $deb_path"
 export DEBIAN_FRONTEND=noninteractive
 
 # Official Ubuntu Docker images configure dpkg to skip installing man pages
@@ -31,14 +30,22 @@ export DEBIAN_FRONTEND=noninteractive
 rm -f /etc/dpkg/dpkg.cfg.d/excludes
 
 apt-get update -qq || fail "apt-get update"
+
+echo "==> Installing distro's stock neovim package"
+apt-get install -y neovim || fail "apt-get install (stock neovim)"
+command -v nvim >/dev/null 2>&1 || fail "nvim not found on PATH after installing stock package"
+stock_version_output="$(nvim --version)"
+echo "Stock version: $(echo "$stock_version_output" | head -n1)"
+
+echo "==> Installing $deb_path over the stock package (upgrade path)"
 apt-get install -y "./${deb_path}" || fail "apt-get install"
 
+echo "==> Verifying upgrade replaced the stock package"
+hash -r
+upgraded_version_output="$(nvim --version)"
+echo "$upgraded_version_output" | grep -qF "$expected_version" || fail "nvim --version does not reflect the upgrade to '$expected_version'"
+
 echo "==> Verifying installation"
-command -v nvim >/dev/null 2>&1 || fail "nvim not found on PATH"
-
-version_output="$(nvim --version)"
-echo "$version_output" | grep -qF "$expected_version" || fail "nvim --version does not contain expected version '$expected_version'"
-
 nvim --headless -es -c 'quit' || fail "nvim --headless smoke test failed"
 
 test -f /usr/share/man/man1/nvim.1.gz || fail "man page not installed"

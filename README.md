@@ -40,16 +40,18 @@ package (if any) is already installed. No special flags are needed.
    under `pkgroot/usr/`, compresses the man page, auto-detects runtime
    dependencies with `ldd` + `dpkg -S`, writes a `DEBIAN/control` file, and
    builds the `.deb` with `dpkg-deb`.
-2. **`scripts/test-deb.sh <deb> <version>`** installs the built package inside
-   a distro container, checks that `nvim` runs and reports the right version,
-   confirms the man page and `dpkg` metadata are correct, then uninstalls it
-   and confirms cleanup.
+2. **`scripts/test-deb.sh <deb> <version>`** installs the distro's own stock
+   `neovim` package first, then installs the built package over it to
+   exercise the upgrade path, checks that `nvim` runs and reports the right
+   version, confirms the man page and `dpkg` metadata are correct, then
+   uninstalls it and confirms cleanup.
 3. **`.github/workflows/release.yml`** runs on a daily schedule (and can be
    triggered manually). It resolves the latest upstream Neovim release (or a
    specific version passed to `workflow_dispatch`), skips if a matching
    GitHub Release already exists in this repo, builds `.deb`s for both
    architectures, tests each one across Ubuntu 22.04/24.04/26.04 and Debian
-   12/13, and only publishes a GitHub Release if every install/smoke-test
+   12/13 — including upgrading from each distro's stock `neovim` package —
+   and only publishes a GitHub Release if every install/smoke-test
    combination passes.
 
 ## Caveats
