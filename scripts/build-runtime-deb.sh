@@ -25,6 +25,22 @@ package_revision="${2:-1}"
 # pull it from -- always use x86_64.
 upstream_arch="x86_64"
 
+# Image used only to run dpkg-deb so the build is reproducible regardless of
+# host OS (this script is expected to work from macOS too).
+build_image="${BUILD_IMAGE:-debian:13}"
+
+# dpkg-deb just archives files; it doesn't need to run under any particular
+# CPU arch, so pin the container to the host's native platform to avoid
+# pointless emulation.
+case "$(uname -m)" in
+  x86_64|amd64) build_platform="amd64" ;;
+  aarch64|arm64) build_platform="arm64" ;;
+  *)
+    echo "Unsupported host architecture: $(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
 version_number="${version#v}"
 deb_version="${version_number}-${package_revision}"
 
@@ -57,6 +73,18 @@ cp -a share "$pkgroot/usr/"
 # Compress the man page per Debian policy.
 gzip -9n "$pkgroot/usr/share/man/man1/nvim.1"
 
+doc_dir="$pkgroot/usr/share/doc/neovim-runtime"
+mkdir -p "$doc_dir"
+cp "$repo_root/debian/copyright" "$doc_dir/copyright"
+
+changelog="$work_dir/changelog.Debian"
+sed -e "s/__VERSION__/${deb_version}/g" \
+    -e "s/__UPSTREAM_TAG__/${version}/g" \
+    -e "s/__ARCH__/all/g" \
+    -e "s/__DATE__/$(date -R)/g" \
+    "$repo_root/debian/changelog-neovim-runtime.template" > "$changelog"
+gzip -9n -c "$changelog" > "$doc_dir/changelog.Debian.gz"
+
 installed_size="$(du -sk "$pkgroot/usr" | cut -f1)"
 
 # No dependency-detection loop here: unlike bin/lib, share/ contains no ELF
@@ -72,27 +100,22 @@ echo "Writing control file"
 # this exact build -- distro stock or one of our own prior bundled releases
 # that still shipped share/ itself -- gets its runtime files reclaimed,
 # while a split neovim at the same version remains mutually installable.
-cat > "$pkgroot/DEBIAN/control" <<EOF
-Package: neovim-runtime
-Version: ${deb_version}
-Section: editors
-Priority: optional
-Architecture: all
-Replaces: neovim (<< ${deb_version})
-Breaks: neovim (<< ${deb_version})
-Installed-Size: ${installed_size}
-Maintainer: Fernando Silveira <fsilveira@gmail.com>
-Homepage: https://neovim.io
-Description: Heavily optimized vi-like text editor (upstream prebuilt release) - runtime files
- Unofficial repackaging of the official Neovim prebuilt release runtime
- files (see https://github.com/neovim/neovim/releases) as a .deb, not
- affiliated with or endorsed by the Neovim project.
-EOF
+sed -e "s/__VERSION__/${deb_version}/g" \
+    -e "s/__ARCH__/all/g" \
+    -e "s/__INSTALLED_SIZE__/${installed_size}/g" \
+    "$repo_root/debian/control-neovim-runtime.template" > "$pkgroot/DEBIAN/control"
+
+deb_name="neovim-runtime_${deb_version}_all.deb"
+pkgroot_container="/work/$(basename "$extracted_dir")/pkgroot"
+
+echo "Building ${deb_name} inside ${build_image}"
+docker run --rm --platform "linux/${build_platform}" \
+  -v "$work_dir:/work" \
+  "$build_image" \
+  dpkg-deb --root-owner-group --build "$pkgroot_container" "/work/${deb_name}"
 
 mkdir -p "$dist_dir"
-deb_path="$dist_dir/neovim-runtime_${deb_version}_all.deb"
-
-echo "Building ${deb_path}"
-dpkg-deb --root-owner-group --build "$pkgroot" "$deb_path"
+deb_path="$dist_dir/$deb_name"
+cp "$work_dir/$deb_name" "$deb_path"
 
 echo "Done: ${deb_path}"

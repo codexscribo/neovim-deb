@@ -1,0 +1,6 @@
+neovim-runtime (__VERSION__) unstable; urgency=medium
+
+  * Repackage of upstream Neovim __UPSTREAM_TAG__ prebuilt release runtime
+    files (__ARCH__) from https://github.com/neovim/neovim/releases.
+
+ -- Fernando Silveira <fsilveira@gmail.com>  __DATE__

@@ -1,0 +1,14 @@
+Package: neovim-runtime
+Version: __VERSION__
+Section: editors
+Priority: optional
+Architecture: __ARCH__
+Replaces: neovim (<< __VERSION__)
+Breaks: neovim (<< __VERSION__)
+Installed-Size: __INSTALLED_SIZE__
+Maintainer: Fernando Silveira <fsilveira@gmail.com>
+Homepage: https://neovim.io
+Description: Heavily optimized vi-like text editor (upstream prebuilt release) - runtime files
+ Unofficial repackaging of the official Neovim prebuilt release runtime
+ files (see https://github.com/neovim/neovim/releases) as a .deb, not
+ affiliated with or endorsed by the Neovim project.

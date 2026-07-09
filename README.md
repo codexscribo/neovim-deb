@@ -12,6 +12,11 @@ publishes the result as a GitHub Release — nothing more.
 
 This project is **not affiliated with or endorsed by the Neovim project**.
 
+Building the packages locally requires `docker`, `curl`, and `bash`. Every
+Debian-specific step (dependency detection, `dpkg-deb --build`) runs inside a
+`debian:13` container, so the build scripts work from macOS or any Linux host
+without local Debian packaging tools installed.
+
 ## Install
 
 ```sh
@@ -57,21 +62,40 @@ always gets you the newest revision of the newest version.
 
 1. **`scripts/build-deb.sh <version> <arch> [package_revision]`** downloads
    the matching upstream release tarball, lays its `bin/` and `lib/`
-   directories out under `pkgroot/usr/`, auto-detects runtime dependencies
-   with `ldd` + `dpkg -S`, writes a `DEBIAN/control` file with version
-   `<version>-<package_revision>` (`package_revision` defaults to `1`) and a
-   `Depends: neovim-runtime (= <same version>)`, and builds the `.deb` with
-   `dpkg-deb`. This package is built once per architecture.
+   directories out under `pkgroot/usr/`, and copies in
+   `usr/share/doc/neovim/{copyright,changelog.Debian.gz}` — the static
+   [`debian/copyright`](./debian/copyright) plus
+   [`debian/changelog-neovim.template`](./debian/changelog-neovim.template)
+   rendered with `sed` and gzipped. It renders
+   [`debian/control-neovim.template`](./debian/control-neovim.template) with
+   `sed` for the package version, architecture, and `Installed-Size`, leaving
+   a `__DEPENDS__` placeholder unresolved. It then runs a `debian:13`
+   container (matching the host's native platform — no QEMU needed for this
+   step) to auto-detect runtime dependencies with `ldd` + `dpkg -S` against
+   Debian's own package database, hard-failing the build if `ldd` reports
+   any unresolved (`not found`) library, fills in `__DEPENDS__` with
+   `neovim-runtime (= <same version>)` plus the detected packages, and builds
+   the `.deb` with `dpkg-deb` inside that same container. This package is
+   built once per architecture.
 2. **`scripts/build-runtime-deb.sh <version> [package_revision]`** downloads
    the same upstream release tarball (always the `x86_64` one — `share/` is
    verified byte-identical across architectures), lays its `share/`
-   directory out under `pkgroot/usr/`, compresses the man page, and builds
-   an `Architecture: all` `.deb` with the same `<version>-<package_revision>`.
-   It carries no `Depends` (nothing under `share/` is an ELF binary), and its
-   `Replaces`/`Breaks` on `neovim (<< <same version>)` let it reclaim runtime
-   files from any older bundled `neovim` package (distro stock or this
-   repo's own pre-split releases) during an upgrade. This package is built
-   once — it isn't architecture-specific.
+   directory out under `pkgroot/usr/`, compresses the man page, and copies in
+   `usr/share/doc/neovim-runtime/{copyright,changelog.Debian.gz}` the same
+   way as `build-deb.sh`, rendering
+   [`debian/control-neovim-runtime.template`](./debian/control-neovim-runtime.template)
+   and
+   [`debian/changelog-neovim-runtime.template`](./debian/changelog-neovim-runtime.template)
+   fully on the host (no dependency detection needed here, so no
+   `__DEPENDS__` placeholder exists in this template). It then runs
+   `dpkg-deb --build` inside a `debian:13` container pinned to the host's
+   native platform (detected via `uname -m`) purely for build reproducibility
+   — nothing under `share/` is an ELF binary, so no dependency detection
+   happens for this package. Its `Replaces`/`Breaks` on
+   `neovim (<< <same version>)` let it reclaim runtime files from any older
+   bundled `neovim` package (distro stock or this repo's own pre-split
+   releases) during an upgrade. This package is built once — it isn't
+   architecture-specific.
 3. **`scripts/test-deb.sh <neovim-deb> <neovim-runtime-deb> <version>`**
    installs the distro's own stock `neovim`/`neovim-runtime` packages first,
    then installs both built packages together to exercise the upgrade path,

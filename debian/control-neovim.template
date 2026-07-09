@@ -1,0 +1,13 @@
+Package: neovim
+Version: __VERSION__
+Section: editors
+Priority: optional
+Architecture: __ARCH__
+Depends: __DEPENDS__
+Installed-Size: __INSTALLED_SIZE__
+Maintainer: Fernando Silveira <fsilveira@gmail.com>
+Homepage: https://neovim.io
+Description: Heavily optimized vi-like text editor (upstream prebuilt release)
+ Unofficial repackaging of the official Neovim prebuilt release binary
+ (see https://github.com/neovim/neovim/releases) as a .deb, not affiliated
+ with or endorsed by the Neovim project.

@@ -21,6 +21,23 @@ version="$1"
 arch="$2"
 package_revision="${3:-1}"
 
+# Debian packages to install inside the build container before running the
+# ldd-based dependency-detection loop below, keyed by nothing in particular
+# -- just a flat curated allowlist. Empirically verified empty against the
+# current upstream release (glibc/libgcc/libm are already present in the
+# bare debian:13 image on both amd64 and arm64); if a future Neovim release
+# picks up a new shared-library dependency not covered by the base image,
+# add the owning package here. The hard-fail check further down guarantees
+# this list can't silently fall out of date.
+extra_packages=()
+
+# Image used only to run ldd/dpkg-deb so dependency detection and package
+# building are reproducible regardless of host OS (this script is expected
+# to work from macOS too). debian:13 matches the GitHub Actions runners'
+# own native platform (amd64: ubuntu-latest: arm64: ubuntu-24.04-arm), so no
+# QEMU emulation is needed for this step.
+build_image="${BUILD_IMAGE:-debian:13}"
+
 case "$arch" in
   amd64) upstream_arch="x86_64" ;;
   arm64) upstream_arch="arm64" ;;
@@ -59,17 +76,63 @@ pkgroot="$extracted_dir/pkgroot"
 mkdir -p "$pkgroot/usr" "$pkgroot/DEBIAN"
 cp -a bin lib "$pkgroot/usr/"
 
+doc_dir="$pkgroot/usr/share/doc/neovim"
+mkdir -p "$doc_dir"
+cp "$repo_root/debian/copyright" "$doc_dir/copyright"
+
+changelog="$work_dir/changelog.Debian"
+sed -e "s/__VERSION__/${deb_version}/g" \
+    -e "s/__UPSTREAM_TAG__/${version}/g" \
+    -e "s/__ARCH__/${arch}/g" \
+    -e "s/__DATE__/$(date -R)/g" \
+    "$repo_root/debian/changelog-neovim.template" > "$changelog"
+gzip -9n -c "$changelog" > "$doc_dir/changelog.Debian.gz"
+
 installed_size="$(du -sk "$pkgroot/usr" | cut -f1)"
 
+echo "Writing control file"
+# Like Debian/Ubuntu's own split of neovim into "neovim" (binary) and
+# "neovim-runtime" (arch:all runtime files), this package ships only bin/lib
+# and depends on neovim-runtime (built by build-runtime-deb.sh) for the
+# arch-independent share/ files. __DEPENDS__ is left unsubstituted here --
+# it can't be computed until the ldd-based dependency-detection loop below
+# runs inside the build container.
+sed -e "s/__VERSION__/${deb_version}/g" \
+    -e "s/__ARCH__/${arch}/g" \
+    -e "s/__INSTALLED_SIZE__/${installed_size}/g" \
+    "$repo_root/debian/control-neovim.template" > "$pkgroot/DEBIAN/control"
+
+deb_name="neovim_${deb_version}_${arch}.deb"
+pkgroot_container="/work/$(basename "$extracted_dir")/pkgroot"
+
+cat > "$work_dir/container-build.sh" <<'EOS'
+set -euo pipefail
+
+if [[ -n "$EXTRA_PACKAGES" ]]; then
+  echo "Installing curated dependency packages: $EXTRA_PACKAGES"
+  apt-get update -qq
+  # shellcheck disable=SC2086
+  apt-get install -y -qq --no-install-recommends $EXTRA_PACKAGES
+fi
+
 echo "Detecting runtime dependencies"
-mapfile -t elf_files < <(find "$pkgroot/usr/bin" "$pkgroot/usr/lib" -type f \( -name '*.so' -o -perm -u+x \) 2>/dev/null)
+mapfile -t elf_files < <(find "$PKGROOT/usr/bin" "$PKGROOT/usr/lib" -type f \( -name '*.so' -o -perm -u+x \) 2>/dev/null)
 
 declare -A dep_packages=()
+missing_libs=()
 for elf in "${elf_files[@]}"; do
   # Skip non-ELF files (e.g. shell scripts) silently.
   if ! ldd "$elf" >/dev/null 2>&1; then
     continue
   fi
+  ldd_output="$(ldd "$elf" 2>/dev/null)"
+
+  if grep -q 'not found$' <<<"$ldd_output"; then
+    while IFS= read -r missing_line; do
+      missing_libs+=("$elf: ${missing_line# }")
+    done < <(grep 'not found$' <<<"$ldd_output")
+  fi
+
   while IFS= read -r libpath; do
     [[ -z "$libpath" ]] && continue
     [[ "$libpath" == *"linux-vdso"* || "$libpath" == *"ld-linux"* ]] && continue
@@ -79,38 +142,38 @@ for elf in "${elf_files[@]}"; do
     real_libpath="$(readlink -f "$libpath")"
     pkg="$(dpkg -S "$real_libpath" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
     [[ -n "$pkg" ]] && dep_packages["$pkg"]=1
-  done < <(ldd "$elf" 2>/dev/null | awk '{ if ($3 ~ /^\//) print $3; else if ($1 ~ /^\//) print $1 }')
+  done < <(awk '{ if ($3 ~ /^\//) print $3; else if ($1 ~ /^\//) print $1 }' <<<"$ldd_output")
 done
 
+if [[ ${#missing_libs[@]} -gt 0 ]]; then
+  echo "ERROR: ldd reported unresolved shared library dependencies:" >&2
+  printf '  %s\n' "${missing_libs[@]}" >&2
+  echo "Add the Debian package that owns the missing SONAME(s) to the" >&2
+  echo "extra_packages allowlist in scripts/build-deb.sh." >&2
+  exit 1
+fi
+
 ldd_depends="$(IFS=,; echo "${!dep_packages[*]}" | sed 's/,/, /g')"
-depends="neovim-runtime (= ${deb_version})"
+depends="neovim-runtime (= ${DEB_VERSION})"
 [[ -n "$ldd_depends" ]] && depends="${depends}, ${ldd_depends}"
 
-echo "Writing control file"
-# Like Debian/Ubuntu's own split of neovim into "neovim" (binary) and
-# "neovim-runtime" (arch:all runtime files), this package ships only bin/lib
-# and depends on neovim-runtime (built by build-runtime-deb.sh) for the
-# arch-independent share/ files.
-cat > "$pkgroot/DEBIAN/control" <<EOF
-Package: neovim
-Version: ${deb_version}
-Section: editors
-Priority: optional
-Architecture: ${arch}
-Depends: ${depends}
-Installed-Size: ${installed_size}
-Maintainer: Neovim Deb Builder <noreply@github.com>
-Homepage: https://neovim.io
-Description: Heavily optimized vi-like text editor (upstream prebuilt release)
- Unofficial repackaging of the official Neovim prebuilt release binary
- (see https://github.com/neovim/neovim/releases) as a .deb, not affiliated
- with or endorsed by the Neovim project.
-EOF
+sed -i "s|__DEPENDS__|${depends}|" "$PKGROOT/DEBIAN/control"
+
+echo "Building ${OUT_DEB}"
+dpkg-deb --root-owner-group --build "$PKGROOT" "$OUT_DEB"
+EOS
+
+echo "Detecting dependencies and building package inside ${build_image}"
+docker run --rm --platform "linux/${arch}" \
+  -e "PKGROOT=${pkgroot_container}" \
+  -e "DEB_VERSION=${deb_version}" \
+  -e "EXTRA_PACKAGES=${extra_packages[*]:-}" \
+  -e "OUT_DEB=/work/${deb_name}" \
+  -v "$work_dir:/work" \
+  "$build_image" bash /work/container-build.sh
 
 mkdir -p "$dist_dir"
-deb_path="$dist_dir/neovim_${deb_version}_${arch}.deb"
-
-echo "Building ${deb_path}"
-dpkg-deb --root-owner-group --build "$pkgroot" "$deb_path"
+deb_path="$dist_dir/$deb_name"
+cp "$work_dir/$deb_name" "$deb_path"
 
 echo "Done: ${deb_path}"
